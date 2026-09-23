@@ -2,10 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { fetchStock, createReservation, fetchReservations, markReservationPicked, updateArticleQuantity, SALERA_MALL_ID } from "./supabaseClient";
 
 /* ---------------------------------------------------------
-   LOOKAID — luxury black & gold, functional prototype
-   Data is persisted via window.storage (shared across users):
-     - "lookaid-stock"        : array of articles
-     - "lookaid-reservations" : array of reservations
+   LOOKAID — prototype fonctionnel connecté à Supabase
 --------------------------------------------------------- */
 
 const FONTS = (
@@ -62,6 +59,11 @@ function computeRoute(storeNames) {
     current = STORE_POSITIONS[chosen];
   }
   return route;
+}
+
+/* Articles d'une réservation qui appartiennent à un ensemble d'articles donné (ex. le stock d'un magasin) */
+function resItemsIn(reservation, storeItems) {
+  return storeItems.filter((i) => (reservation.itemNames || []).includes(i.name));
 }
 
 const SEED_STOCK = [
@@ -441,7 +443,9 @@ function ClientView({ stock, reservations, onReserve }) {
           <div style={{ border: `1px solid ${GOLD}`, padding: 20, textAlign: "center", marginBottom: 18 }}>
             <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 11, letterSpacing: "0.15em", marginBottom: 8 }}>CODE DE RETRAIT</div>
             <div className="lk-display" style={{ color: GOLD, fontSize: 32, letterSpacing: "0.06em" }}>{lastRes.code}</div>
-            <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 12, marginTop: 10 }}>Présentez ce code en boutique {lastRes.store}</div>
+            <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 12, marginTop: 10 }}>
+              Présentez ce code dans chaque boutique : {[...new Set(stock.filter((i) => lastRes.itemIds.includes(i.id)).map((i) => i.store))].join(", ")}
+            </div>
           </div>
           <div className="lk-body" style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: CREAM_SOFT, borderTop: `1px solid ${LINE}`, paddingTop: 12, marginBottom: 18 }}>
             <span>{lastRes.paymentMethod}</span>
@@ -497,7 +501,8 @@ function ClientView({ stock, reservations, onReserve }) {
 /* ---------------- Store view ---------------- */
 function StoreView({ storeName, setStoreName, stock, reservations, onStockChange, onReservationsChange }) {
   const myStock = stock.filter((i) => i.store === storeName);
-  const myRes = reservations.filter((r) => r.store === storeName);
+  // Uniquement les réservations contenant au moins un article de ce magasin
+  const myRes = reservations.filter((r) => resItemsIn(r, myStock).length > 0);
   const pending = myRes.filter((r) => r.status === "En attente").length;
 
   async function changeQty(id, delta) {
@@ -557,18 +562,26 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
         <SectionTitle>Réservations</SectionTitle>
         {myRes.length === 0 && <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 13 }}>Aucune réservation pour le moment.</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {myRes.map((r) => (
-            <div key={r.id} style={{ border: `1px solid ${LINE}`, padding: "10px 14px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span className="lk-display" style={{ color: GOLD, fontSize: 15 }}>{r.code}</span>
-                <span className="lk-body" style={{ fontSize: 11, color: r.status === "Récupéré" ? "#7FA875" : CREAM_SOFT }}>{r.status}</span>
+          {myRes.map((r) => {
+            const mine = resItemsIn(r, myStock);
+            return (
+              <div key={r.id} style={{ border: `1px solid ${LINE}`, padding: "10px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span className="lk-display" style={{ color: GOLD, fontSize: 15 }}>{r.code}</span>
+                  <span className="lk-body" style={{ fontSize: 11, color: r.status === "Récupéré" ? "#7FA875" : CREAM_SOFT }}>{r.status}</span>
+                </div>
+                <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 12, marginTop: 4 }}>
+                  {mine.map((i) => i.name).join(", ")}
+                </div>
+                <div className="lk-body" style={{ color: CREAM, fontSize: 12, marginTop: 4 }}>
+                  {money(mine.reduce((s, i) => s + i.price, 0))}
+                </div>
+                {r.status === "En attente" && (
+                  <button onClick={() => markPicked(r.id)} className="lk-body" style={{ ...btnGhost, marginTop: 8, fontSize: 11 }}>Marquer récupéré</button>
+                )}
               </div>
-              <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 12, marginTop: 4 }}>{r.itemNames.join(", ")}</div>
-              {r.status === "En attente" && (
-                <button onClick={() => markPicked(r.id)} className="lk-body" style={{ ...btnGhost, marginTop: 8, fontSize: 11 }}>Marquer récupéré</button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -597,12 +610,13 @@ function MallView() {
 
   const byStore = STORE_NAMES.map((name) => {
     const items = stock.filter((i) => i.store === name);
-    const res = reservations.filter((r) => r.store === name);
+    const res = reservations.filter((r) => resItemsIn(r, items).length > 0);
     return {
       name,
       articles: items.reduce((s, i) => s + i.qty, 0),
       reservations: res.length,
-      revenue: res.reduce((s, r) => s + r.total, 0),
+      // chiffre d'affaires = uniquement les articles de CE magasin dans chaque réservation
+      revenue: res.reduce((s, r) => s + resItemsIn(r, items).reduce((t, i) => t + i.price, 0), 0),
     };
   });
   const maxRes = Math.max(1, ...byStore.map((s) => s.reservations));
@@ -654,26 +668,37 @@ function MallMap({ route }) {
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
-    <svg viewBox="0 0 100 62" style={{ width: "100%", height: "auto", background: "#F0E9FB", border: `1px solid ${LINE}` }}>
-      {/* store markers not on route, shown faint */}
-      {Object.entries(STORE_POSITIONS).map(([name, p]) => (
-        <g key={name} opacity={route.includes(name) ? 1 : 0.28}>
-          <circle cx={p.x} cy={p.y} r={2.6} fill={route.includes(name) ? GOLD : "#D6CDEF"} />
-          <text x={p.x} y={p.y - 4.5} fontSize="4" fill={route.includes(name) ? CREAM : CREAM_SOFT} textAnchor="middle" fontFamily="Jost, sans-serif">
-            {name}
-          </text>
-        </g>
-      ))}
-      {/* entrance */}
-      <rect x={ENTRANCE.x - 3} y={ENTRANCE.y - 2} width={6} height={4} fill="none" stroke={CREAM_SOFT} strokeWidth={0.4} />
-      <text x={ENTRANCE.x} y={ENTRANCE.y + 6} fontSize="3.6" fill={CREAM_SOFT} textAnchor="middle" fontFamily="Jost, sans-serif">Entrée</text>
+    <svg viewBox="0 0 100 64" style={{ width: "100%", height: "auto", background: "#F0E9FB", border: `1px solid ${LINE}` }}>
+      {/* magasins hors parcours : plus discrets mais lisibles */}
+      {Object.entries(STORE_POSITIONS).map(([name, p]) => {
+        const onRoute = route.includes(name);
+        return (
+          <g key={name}>
+            <circle cx={p.x} cy={p.y} r={2.6} fill={onRoute ? GOLD : "#C9BEE8"} />
+            <text
+              x={p.x}
+              y={p.y - 4.5}
+              fontSize="4"
+              fill={onRoute ? CREAM : CREAM_SOFT}
+              fontWeight={onRoute ? 600 : 400}
+              textAnchor="middle"
+              fontFamily="Jost, sans-serif"
+            >
+              {name}
+            </text>
+          </g>
+        );
+      })}
+      {/* entrée */}
+      <rect x={ENTRANCE.x - 3} y={ENTRANCE.y - 2} width={6} height={4} fill="#FFFFFF" stroke={CREAM} strokeWidth={0.5} />
+      <text x={ENTRANCE.x + 5} y={ENTRANCE.y + 1.4} fontSize="3.8" fill={CREAM} textAnchor="start" fontFamily="Jost, sans-serif">Entrée</text>
 
-      {/* route path */}
-      <path d={pathD} fill="none" stroke={GOLD} strokeWidth={0.6} strokeDasharray="1.6 1.2" />
+      {/* parcours */}
+      <path d={pathD} fill="none" stroke={GOLD} strokeWidth={0.7} strokeDasharray="1.6 1.2" />
       {route.map((name, i) => {
         const p = STORE_POSITIONS[name];
         return (
-          <text key={name} x={p.x} y={p.y + 8} fontSize="4.4" fill={GOLD} textAnchor="middle" fontFamily="Cormorant Garamond, serif">
+          <text key={name} x={p.x} y={p.y + 1.5} fontSize="3.6" fill="#FFFFFF" fontWeight={600} textAnchor="middle" fontFamily="Jost, sans-serif">
             {i + 1}
           </text>
         );
