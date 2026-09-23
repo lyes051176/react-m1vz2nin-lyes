@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { fetchStock, createReservation, fetchReservations, markReservationPicked, updateArticleQuantity, SALERA_MALL_ID } from "./supabaseClient";
-
+import { fetchStock, createReservation, fetchReservations, markStoreItemsPicked, updateArticleQuantity, SALERA_MALL_ID } from "./supabaseClient";
+ 
 /* ---------------------------------------------------------
    LOOKAID — prototype fonctionnel connecté à Supabase
 --------------------------------------------------------- */
-
+ 
 const FONTS = (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap');
@@ -13,7 +13,7 @@ const FONTS = (
     .lk-body { font-family: 'Jost', sans-serif; }
   `}</style>
 );
-
+ 
 const GOLD = "#7B2FF7";
 const GOLD_SOFT = "#FF3D71";
 const BG = "#FBF7FF";
@@ -21,9 +21,9 @@ const PANEL = "#FFFFFF";
 const LINE = "#E3DCF5";
 const CREAM = "#1D1730";
 const CREAM_SOFT = "#756E8C";
-
+ 
 const STORE_NAMES = ["Zara", "Mango", "Bershka", "Massimo Dutti", "Stradivarius", "Pull&Bear"];
-
+ 
 /* Mall floor plan — simple coordinate system (0-100 x, 0-60 y) */
 const ENTRANCE = { x: 50, y: 58, label: "Entrée" };
 const STORE_POSITIONS = {
@@ -34,11 +34,11 @@ const STORE_POSITIONS = {
   Stradivarius: { x: 50, y: 15 },
   "Pull&Bear": { x: 50, y: 45 },
 };
-
+ 
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
-
+ 
 /* Nearest-neighbour heuristic: shortest route visiting each required store once, starting at the entrance */
 function computeRoute(storeNames) {
   const remaining = [...new Set(storeNames)];
@@ -60,12 +60,24 @@ function computeRoute(storeNames) {
   }
   return route;
 }
-
+ 
 /* Articles d'une réservation qui appartiennent à un ensemble d'articles donné (ex. le stock d'un magasin) */
 function resItemsIn(reservation, storeItems) {
+  if (reservation.items) {
+    const ids = reservation.items.map((x) => x.id);
+    return storeItems.filter((i) => ids.includes(i.id));
+  }
   return storeItems.filter((i) => (reservation.itemNames || []).includes(i.name));
 }
-
+ 
+/* Un magasin a-t-il remis tous SES articles de cette réservation ? */
+function isPickedForStore(reservation, storeItems) {
+  if (reservation.status === "Récupéré") return true;
+  const mineIds = resItemsIn(reservation, storeItems).map((i) => i.id);
+  if (!reservation.items || mineIds.length === 0) return false;
+  return reservation.items.filter((x) => mineIds.includes(x.id)).every((x) => x.picked);
+}
+ 
 const SEED_STOCK = [
   { id: "s1", store: "Zara", name: "Blazer oversize", price: 49, qty: 8, style: "Minimaliste" },
   { id: "s2", store: "Zara", name: "Robe imprimée", price: 39, qty: 6, style: "Bohème" },
@@ -98,15 +110,15 @@ const SEED_STOCK = [
   { id: "s29", store: "Pull&Bear", name: "Sweat à capuche", price: 33, qty: 9, style: "Casual" },
   { id: "s30", store: "Pull&Bear", name: "Baskets toile", price: 39, qty: 7, style: "Casual" },
 ];
-
+ 
 function money(n) {
   return n.toLocaleString("fr-FR", { minimumFractionDigits: 0 }) + " €";
 }
-
+ 
 function genCode() {
   return "LK-" + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
-
+ 
 /* ================= APP ================= */
 export default function LookaidApp() {
   const [role, setRole] = useState(null); // null | 'client' | 'store' | 'mall'
@@ -114,25 +126,25 @@ export default function LookaidApp() {
   const [stock, setStock] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [ready, setReady] = useState(false);
-
+ 
   const refresh = useCallback(async () => {
     const [s, r] = await Promise.all([fetchStock(SALERA_MALL_ID), fetchReservations(SALERA_MALL_ID)]);
     setStock(s.length ? s : SEED_STOCK);
     setReservations(r);
     setReady(true);
   }, []);
-
+ 
   useEffect(() => {
     refresh();
   }, [refresh]);
-
+ 
   function updateStock(next) {
     setStock(next);
   }
   function updateReservations(next) {
     setReservations(next);
   }
-
+ 
   if (!ready) {
     return (
       <div style={{ minHeight: "100vh", background: BG, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -141,7 +153,7 @@ export default function LookaidApp() {
       </div>
     );
   }
-
+ 
   return (
     <div style={{ minHeight: "100vh", background: BG, padding: "28px 16px 60px" }}>
       {FONTS}
@@ -173,7 +185,7 @@ export default function LookaidApp() {
     </div>
   );
 }
-
+ 
 /* ---------------- Header ---------------- */
 function Header({ role, storeName, onLogout }) {
   return (
@@ -189,7 +201,7 @@ function Header({ role, storeName, onLogout }) {
     </div>
   );
 }
-
+ 
 /* ---------------- Login ---------------- */
 function Login({ onLogin }) {
   const [pickedStore, setPickedStore] = useState(STORE_NAMES[0]);
@@ -199,7 +211,7 @@ function Login({ onLogin }) {
       <div className="lk-body" style={{ fontSize: 13, color: CREAM_SOFT, marginBottom: 26, lineHeight: 1.6 }}>
         Choisissez votre espace pour accéder à Lookaid.
       </div>
-
+ 
       <RoleCard title="Client" desc="Découvrir, réserver et récupérer des articles en boutique." onClick={() => onLogin("client")} />
       <div style={{ marginTop: 12, border: `1px solid ${LINE}`, padding: "16px 18px" }}>
         <div className="lk-body" style={{ color: CREAM, fontSize: 15, marginBottom: 4, letterSpacing: "0.02em" }}>Magasin</div>
@@ -224,7 +236,7 @@ function Login({ onLogin }) {
     </div>
   );
 }
-
+ 
 function RoleCard({ title, desc, onClick }) {
   return (
     <button onClick={onClick} className="lk-body" style={{ ...cardBtn }}>
@@ -233,12 +245,12 @@ function RoleCard({ title, desc, onClick }) {
     </button>
   );
 }
-
+ 
 /* ---------------- Client view ---------------- */
 const GENDERS = ["Femme", "Homme", "Enfant"];
 const OCCASIONS = ["Travail", "Soirée", "Casual", "Cérémonie"];
 const STYLES = ["Minimaliste", "Classique", "Streetwear", "Bohème"];
-
+ 
 function ClientView({ stock, reservations, onReserve }) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState({ gender: null, occasion: null, style: null });
@@ -247,16 +259,16 @@ function ClientView({ stock, reservations, onReserve }) {
   const [payMethod, setPayMethod] = useState("card");
   const [card, setCard] = useState({ number: "", expiry: "", cvc: "" });
   const [paying, setPaying] = useState(false);
-
+ 
   const complete = profile.gender && profile.occasion && profile.style;
   const suggestions = stock.filter((i) => i.qty > 0 && (!profile.style || i.style === profile.style));
   const cartTotal = stock.filter((i) => cart.includes(i.id)).reduce((s, i) => s + i.price, 0);
   const cardValid = payMethod === "onsite" || (card.number.replace(/\s/g, "").length >= 12 && card.expiry.length === 5 && card.cvc.length >= 3);
-
+ 
   function toggleCart(id) {
     setCart((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
   }
-
+ 
   function formatCardNumber(v) {
     return v.replace(/\D/g, "").slice(0, 16).replace(/(.{4})/g, "$1 ").trim();
   }
@@ -264,7 +276,7 @@ function ClientView({ stock, reservations, onReserve }) {
     const digits = v.replace(/\D/g, "").slice(0, 4);
     return digits.length > 2 ? digits.slice(0, 2) + "/" + digits.slice(2) : digits;
   }
-
+ 
   async function payAndReserve() {
     setPaying(true);
     const items = stock.filter((i) => cart.includes(i.id));
@@ -284,7 +296,7 @@ function ClientView({ stock, reservations, onReserve }) {
       cardLast4: payMethod === "card" ? card.number.replace(/\s/g, "").slice(-4) : null,
       ts: Date.now(),
     };
-    await createReservation({
+    const created = await createReservation({
       mallId: SALERA_MALL_ID,
       code: res.code,
       items,
@@ -292,16 +304,19 @@ function ClientView({ stock, reservations, onReserve }) {
       paymentMethod: res.paymentMethod,
       paymentStatus: res.paymentStatus,
     });
+    // on utilise le vrai identifiant Supabase pour que le magasin puisse valider le retrait
+    if (created) res.id = created.id;
+    res.items = items.map((i) => ({ id: i.id, name: i.name, store: i.store, picked: false }));
     await onReserve([res, ...reservations]);
     setLastRes(res);
     setPaying(false);
     setStep(3);
   }
-
+ 
   return (
     <div style={panelStyle}>
       <Steps step={step} labels={["Profil", "Sélection", "Paiement", "Confirmation", "Itinéraire"]} />
-
+ 
       {step === 0 && (
         <>
           <SectionTitle>Dites-nous pour qui</SectionTitle>
@@ -313,7 +328,7 @@ function ClientView({ stock, reservations, onReserve }) {
           </button>
         </>
       )}
-
+ 
       {step === 1 && (
         <>
           <SectionTitle>Sélection pour vous</SectionTitle>
@@ -355,7 +370,7 @@ function ClientView({ stock, reservations, onReserve }) {
           </button>
         </>
       )}
-
+ 
       {step === 2 && (
         <>
           <SectionTitle>Paiement</SectionTitle>
@@ -371,7 +386,7 @@ function ClientView({ stock, reservations, onReserve }) {
               <span style={{ color: GOLD, fontSize: 16 }} className="lk-display">{money(cartTotal)}</span>
             </div>
           </div>
-
+ 
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             <button
               onClick={() => setPayMethod("card")}
@@ -388,7 +403,7 @@ function ClientView({ stock, reservations, onReserve }) {
               Payer en boutique
             </button>
           </div>
-
+ 
           {payMethod === "card" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
               <input
@@ -419,13 +434,13 @@ function ClientView({ stock, reservations, onReserve }) {
               </div>
             </div>
           )}
-
+ 
           {payMethod === "onsite" && (
             <div className="lk-body" style={{ fontSize: 12, color: CREAM_SOFT, marginBottom: 20, lineHeight: 1.6 }}>
               Le montant sera à régler directement en boutique au moment du retrait, avec votre code de retrait.
             </div>
           )}
-
+ 
           <button
             disabled={!cardValid || paying}
             onClick={payAndReserve}
@@ -436,7 +451,7 @@ function ClientView({ stock, reservations, onReserve }) {
           </button>
         </>
       )}
-
+ 
       {step === 3 && lastRes && (
         <>
           <SectionTitle>C'est réservé</SectionTitle>
@@ -456,7 +471,7 @@ function ClientView({ stock, reservations, onReserve }) {
           </button>
         </>
       )}
-
+ 
       {step === 4 && lastRes && (() => {
         const items = stock.filter((i) => lastRes.itemIds.includes(i.id));
         const storesInCart = items.map((i) => i.store);
@@ -497,14 +512,14 @@ function ClientView({ stock, reservations, onReserve }) {
     </div>
   );
 }
-
+ 
 /* ---------------- Store view ---------------- */
 function StoreView({ storeName, setStoreName, stock, reservations, onStockChange, onReservationsChange }) {
   const myStock = stock.filter((i) => i.store === storeName);
   // Uniquement les réservations contenant au moins un article de ce magasin
   const myRes = reservations.filter((r) => resItemsIn(r, myStock).length > 0);
-  const pending = myRes.filter((r) => r.status === "En attente").length;
-
+  const pending = myRes.filter((r) => !isPickedForStore(r, myStock)).length;
+ 
   async function changeQty(id, delta) {
     const item = myStock.find((i) => i.id === id);
     const newQty = Math.max(0, item.qty + delta);
@@ -512,13 +527,18 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
     const next = stock.map((i) => (i.id === id ? { ...i, qty: newQty } : i));
     onStockChange(next);
   }
-
-  async function markPicked(id) {
-    await markReservationPicked(id);
-    const next = reservations.map((r) => (r.id === id ? { ...r, status: "Récupéré" } : r));
+ 
+  async function markPicked(r) {
+    const mineIds = resItemsIn(r, myStock).map((i) => i.id);
+    const allPicked = await markStoreItemsPicked(r.id, mineIds);
+    const next = reservations.map((x) => {
+      if (x.id !== r.id) return x;
+      const items = (x.items || []).map((it) => (mineIds.includes(it.id) ? { ...it, picked: true } : it));
+      return { ...x, items, status: allPicked ? "Récupéré" : x.status };
+    });
     onReservationsChange(next);
   }
-
+ 
   return (
     <div>
       <div style={{ ...panelStyle, marginBottom: 14 }}>
@@ -531,7 +551,7 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
           <Kpi num={pending} label="Réservations en attente" />
         </div>
       </div>
-
+ 
       <div style={{ ...panelStyle, marginBottom: 14 }}>
         <SectionTitle>Stock</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -557,18 +577,19 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
           ))}
         </div>
       </div>
-
+ 
       <div style={panelStyle}>
         <SectionTitle>Réservations</SectionTitle>
         {myRes.length === 0 && <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 13 }}>Aucune réservation pour le moment.</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {myRes.map((r) => {
             const mine = resItemsIn(r, myStock);
+            const done = isPickedForStore(r, myStock);
             return (
               <div key={r.id} style={{ border: `1px solid ${LINE}`, padding: "10px 14px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span className="lk-display" style={{ color: GOLD, fontSize: 15 }}>{r.code}</span>
-                  <span className="lk-body" style={{ fontSize: 11, color: r.status === "Récupéré" ? "#7FA875" : CREAM_SOFT }}>{r.status}</span>
+                  <span className="lk-body" style={{ fontSize: 11, color: done ? "#7FA875" : CREAM_SOFT }}>{done ? "Récupéré" : "En attente"}</span>
                 </div>
                 <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 12, marginTop: 4 }}>
                   {mine.map((i) => i.name).join(", ")}
@@ -576,8 +597,8 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
                 <div className="lk-body" style={{ color: CREAM, fontSize: 12, marginTop: 4 }}>
                   {money(mine.reduce((s, i) => s + i.price, 0))}
                 </div>
-                {r.status === "En attente" && (
-                  <button onClick={() => markPicked(r.id)} className="lk-body" style={{ ...btnGhost, marginTop: 8, fontSize: 11 }}>Marquer récupéré</button>
+                {!done && (
+                  <button onClick={() => markPicked(r)} className="lk-body" style={{ ...btnGhost, marginTop: 8, fontSize: 11 }}>Marquer récupéré</button>
                 )}
               </div>
             );
@@ -587,14 +608,14 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
     </div>
   );
 }
-
+ 
 /* ---------------- Mall view ---------------- */
 function MallView() {
   const [stock, setStock] = useState([]);
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
-
+ 
   const load = useCallback(async () => {
     setLoading(true);
     const [s, r] = await Promise.all([fetchStock(SALERA_MALL_ID), fetchReservations(SALERA_MALL_ID)]);
@@ -603,11 +624,11 @@ function MallView() {
     setLoading(false);
     setLastUpdated(new Date());
   }, []);
-
+ 
   useEffect(() => {
     load();
   }, [load]);
-
+ 
   const byStore = STORE_NAMES.map((name) => {
     const items = stock.filter((i) => i.store === name);
     const res = reservations.filter((r) => resItemsIn(r, items).length > 0);
@@ -621,7 +642,7 @@ function MallView() {
   });
   const maxRes = Math.max(1, ...byStore.map((s) => s.reservations));
   const top = [...byStore].sort((a, b) => b.reservations - a.reservations)[0];
-
+ 
   return (
     <div style={panelStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
@@ -661,12 +682,12 @@ function MallView() {
     </div>
   );
 }
-
+ 
 /* ---------------- Mall map / itinerary ---------------- */
 function MallMap({ route }) {
   const points = [ENTRANCE, ...route.map((name) => STORE_POSITIONS[name])];
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-
+ 
   return (
     <svg viewBox="0 0 100 64" style={{ width: "100%", height: "auto", background: "#F0E9FB", border: `1px solid ${LINE}` }}>
       {/* magasins hors parcours : plus discrets mais lisibles */}
@@ -692,7 +713,7 @@ function MallMap({ route }) {
       {/* entrée */}
       <rect x={ENTRANCE.x - 3} y={ENTRANCE.y - 2} width={6} height={4} fill="#FFFFFF" stroke={CREAM} strokeWidth={0.5} />
       <text x={ENTRANCE.x + 5} y={ENTRANCE.y + 1.4} fontSize="3.8" fill={CREAM} textAnchor="start" fontFamily="Jost, sans-serif">Entrée</text>
-
+ 
       {/* parcours */}
       <path d={pathD} fill="none" stroke={GOLD} strokeWidth={0.7} strokeDasharray="1.6 1.2" />
       {route.map((name, i) => {
@@ -706,7 +727,7 @@ function MallMap({ route }) {
     </svg>
   );
 }
-
+ 
 /* ---------------- shared bits ---------------- */
 function Steps({ step, labels }) {
   return (
@@ -720,11 +741,11 @@ function Steps({ step, labels }) {
     </div>
   );
 }
-
+ 
 function SectionTitle({ children }) {
   return <div className="lk-display" style={{ fontSize: 20, color: CREAM, marginBottom: 16 }}>{children}</div>;
 }
-
+ 
 function ChipGroup({ label, options, value, onChange }) {
   return (
     <div style={{ marginBottom: 18 }}>
@@ -751,7 +772,7 @@ function ChipGroup({ label, options, value, onChange }) {
     </div>
   );
 }
-
+ 
 function Kpi({ num, label }) {
   return (
     <div style={{ flex: 1, border: `1px solid ${LINE}`, padding: "12px 10px", textAlign: "center" }}>
@@ -760,7 +781,7 @@ function Kpi({ num, label }) {
     </div>
   );
 }
-
+ 
 /* ---------------- style tokens ---------------- */
 const panelStyle = {
   background: PANEL,
@@ -819,3 +840,4 @@ const stepBtn = {
   fontSize: 13,
   lineHeight: 1,
 };
+ 
