@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { fetchStock, createReservation, fetchReservations, markReservationPicked, updateArticleQuantity, SALERA_MALL_ID } from "./supabaseClient";
 
+/* ---------------------------------------------------------
+   LOOKAID — luxury black & gold, functional prototype
+   Data is persisted via window.storage (shared across users):
+     - "lookaid-stock"        : array of articles
+     - "lookaid-reservations" : array of reservations
+--------------------------------------------------------- */
+
 const FONTS = (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Jost:wght@300;400;500;600&display=swap');
@@ -20,6 +27,7 @@ const CREAM_SOFT = "#756E8C";
 
 const STORE_NAMES = ["Zara", "Mango", "Bershka", "Massimo Dutti", "Stradivarius", "Pull&Bear"];
 
+/* Mall floor plan — simple coordinate system (0-100 x, 0-60 y) */
 const ENTRANCE = { x: 50, y: 58, label: "Entrée" };
 const STORE_POSITIONS = {
   Zara: { x: 15, y: 12 },
@@ -34,6 +42,7 @@ function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+/* Nearest-neighbour heuristic: shortest route visiting each required store once, starting at the entrance */
 function computeRoute(storeNames) {
   const remaining = [...new Set(storeNames)];
   const route = [];
@@ -96,8 +105,9 @@ function genCode() {
   return "LK-" + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
+/* ================= APP ================= */
 export default function LookaidApp() {
-  const [role, setRole] = useState(null);
+  const [role, setRole] = useState(null); // null | 'client' | 'store' | 'mall'
   const [storeName, setStoreName] = useState(STORE_NAMES[0]);
   const [stock, setStock] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -162,6 +172,7 @@ export default function LookaidApp() {
   );
 }
 
+/* ---------------- Header ---------------- */
 function Header({ role, storeName, onLogout }) {
   return (
     <div style={{ maxWidth: 460, margin: "0 auto 30px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -177,6 +188,7 @@ function Header({ role, storeName, onLogout }) {
   );
 }
 
+/* ---------------- Login ---------------- */
 function Login({ onLogin }) {
   const [pickedStore, setPickedStore] = useState(STORE_NAMES[0]);
   return (
@@ -220,6 +232,7 @@ function RoleCard({ title, desc, onClick }) {
   );
 }
 
+/* ---------------- Client view ---------------- */
 const GENDERS = ["Femme", "Homme", "Enfant"];
 const OCCASIONS = ["Travail", "Soirée", "Casual", "Cérémonie"];
 const STYLES = ["Minimaliste", "Classique", "Streetwear", "Bohème"];
@@ -253,6 +266,7 @@ function ClientView({ stock, reservations, onReserve }) {
   async function payAndReserve() {
     setPaying(true);
     const items = stock.filter((i) => cart.includes(i.id));
+    // simulated payment processing delay
     await new Promise((r) => setTimeout(r, 900));
     const res = {
       id: "r" + Date.now(),
@@ -319,9 +333,16 @@ function ClientView({ stock, reservations, onReserve }) {
                   background: cart.includes(item.id) ? "rgba(123,47,247,0.08)" : "transparent",
                 }}
               >
-                <div>
-                  <div className="lk-body" style={{ color: CREAM, fontSize: 14 }}>{item.name}</div>
-                  <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 11, marginTop: 2 }}>{item.store}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <img
+                    src={item.image || `https://placehold.co/80x80/EDE7FB/7B2FF7?text=${encodeURIComponent(item.name.split(" ")[0])}`}
+                    alt={item.name}
+                    style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+                  />
+                  <div>
+                    <div className="lk-body" style={{ color: CREAM, fontSize: 14 }}>{item.name}</div>
+                    <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 11, marginTop: 2 }}>{item.store}</div>
+                  </div>
                 </div>
                 <div className="lk-display" style={{ color: GOLD, fontSize: 16 }}>{money(item.price)}</div>
               </div>
@@ -473,6 +494,7 @@ function ClientView({ stock, reservations, onReserve }) {
   );
 }
 
+/* ---------------- Store view ---------------- */
 function StoreView({ storeName, setStoreName, stock, reservations, onStockChange, onReservationsChange }) {
   const myStock = stock.filter((i) => i.store === storeName);
   const myRes = reservations.filter((r) => r.store === storeName);
@@ -510,9 +532,16 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {myStock.map((item) => (
             <div key={item.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${LINE}`, paddingBottom: 8 }}>
-              <div>
-                <div className="lk-body" style={{ color: CREAM, fontSize: 13 }}>{item.name}</div>
-                <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 11 }}>{money(item.price)}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img
+                  src={item.image || `https://placehold.co/80x80/EDE7FB/7B2FF7?text=${encodeURIComponent(item.name.split(" ")[0])}`}
+                  alt={item.name}
+                  style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover", flexShrink: 0 }}
+                />
+                <div>
+                  <div className="lk-body" style={{ color: CREAM, fontSize: 13 }}>{item.name}</div>
+                  <div className="lk-body" style={{ color: CREAM_SOFT, fontSize: 11 }}>{money(item.price)}</div>
+                </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => changeQty(item.id, -1)} style={stepBtn}>–</button>
@@ -545,6 +574,8 @@ function StoreView({ storeName, setStoreName, stock, reservations, onStockChange
     </div>
   );
 }
+
+/* ---------------- Mall view ---------------- */
 function MallView() {
   const [stock, setStock] = useState([]);
   const [reservations, setReservations] = useState([]);
@@ -591,7 +622,7 @@ function MallView() {
         </div>
       )}
       <div style={{ display: "flex", gap: 10, marginBottom: 22 }}>
-        <Kpi num={STORE_NAMES.length} label="Magasins" />9
+        <Kpi num={STORE_NAMES.length} label="Magasins" />
         <Kpi num={reservations.length} label="Réservations" />
         <Kpi num={stock.reduce((s, i) => s + i.qty, 0)} label="Articles" />
       </div>
@@ -616,12 +647,15 @@ function MallView() {
     </div>
   );
 }
+
+/* ---------------- Mall map / itinerary ---------------- */
 function MallMap({ route }) {
   const points = [ENTRANCE, ...route.map((name) => STORE_POSITIONS[name])];
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
     <svg viewBox="0 0 100 62" style={{ width: "100%", height: "auto", background: "#F0E9FB", border: `1px solid ${LINE}` }}>
+      {/* store markers not on route, shown faint */}
       {Object.entries(STORE_POSITIONS).map(([name, p]) => (
         <g key={name} opacity={route.includes(name) ? 1 : 0.28}>
           <circle cx={p.x} cy={p.y} r={2.6} fill={route.includes(name) ? GOLD : "#D6CDEF"} />
@@ -630,9 +664,11 @@ function MallMap({ route }) {
           </text>
         </g>
       ))}
+      {/* entrance */}
       <rect x={ENTRANCE.x - 3} y={ENTRANCE.y - 2} width={6} height={4} fill="none" stroke={CREAM_SOFT} strokeWidth={0.4} />
       <text x={ENTRANCE.x} y={ENTRANCE.y + 6} fontSize="3.6" fill={CREAM_SOFT} textAnchor="middle" fontFamily="Jost, sans-serif">Entrée</text>
 
+      {/* route path */}
       <path d={pathD} fill="none" stroke={GOLD} strokeWidth={0.6} strokeDasharray="1.6 1.2" />
       {route.map((name, i) => {
         const p = STORE_POSITIONS[name];
@@ -646,6 +682,7 @@ function MallMap({ route }) {
   );
 }
 
+/* ---------------- shared bits ---------------- */
 function Steps({ step, labels }) {
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 22 }}>
@@ -699,6 +736,7 @@ function Kpi({ num, label }) {
   );
 }
 
+/* ---------------- style tokens ---------------- */
 const panelStyle = {
   background: PANEL,
   border: `1px solid ${LINE}`,

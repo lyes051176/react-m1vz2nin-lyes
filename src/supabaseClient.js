@@ -38,6 +38,7 @@ export async function fetchStock(mallId) {
       price: Number(a.price),
       qty: a.quantity,
       style: a.style,
+      image: a.image_url,
     }));
 }
 
